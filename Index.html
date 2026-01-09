@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>MLBB Account Creation Date</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #0f172a;
+            color: #e5e7eb;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .card {
+            background: #020617;
+            padding: 20px;
+            border-radius: 10px;
+            width: 100%;
+            max-width: 400px;
+            box-shadow: 0 0 15px rgba(0,0,0,.5);
+        }
+        h1 {
+            text-align: center;
+            font-size: 18px;
+            margin-bottom: 15px;
+        }
+        input, button {
+            width: 100%;
+            padding: 10px;
+            margin-top: 10px;
+            border-radius: 5px;
+            border: none;
+        }
+        input {
+            background: #020617;
+            border: 1px solid #334155;
+            color: #fff;
+        }
+        button {
+            background: #2563eb;
+            color: #fff;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #1d4ed8;
+        }
+        .result {
+            margin-top: 15px;
+            font-size: 14px;
+            white-space: pre-line;
+        }
+        .error {
+            color: #f87171;
+        }
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <h1>MLBB Account Creation Date</h1>
+
+    <input id="userId" placeholder="Enter User ID">
+    <input id="zoneId" placeholder="Enter Zone ID">
+
+    <button onclick="checkAccount()">Check</button>
+
+    <div id="result" class="result"></div>
+</div>
+
+<script>
+const API_URL = "https://artixlucien.x10.mx/mlbb/creation";
+
+/* ===== HIDDEN API KEY ===== */
+function getSecretKey() {
+    const a = [106,97,114];        // jar
+    const b = [101,108,108,105];   // elli
+    const c = [115,103,111,100,48]; // sgod0
+
+    return [...a, ...b, ...c]
+        .map(x => String.fromCharCode(x))
+        .reverse()
+        .reverse()
+        .join("");
+}
+/* ========================== */
+
+async function hmacSHA256(key, message) {
+    const enc = new TextEncoder();
+    const cryptoKey = await crypto.subtle.importKey(
+        "raw",
+        enc.encode(key),
+        { name: "HMAC", hash: "SHA-256" },
+        false,
+        ["sign"]
+    );
+    const signature = await crypto.subtle.sign(
+        "HMAC",
+        cryptoKey,
+        enc.encode(message)
+    );
+    return new Uint8Array(signature);
+}
+
+function toHex(buffer) {
+    return [...buffer].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function checkAccount() {
+    const userId = document.getElementById("userId").value.trim();
+    const zoneId = document.getElementById("zoneId").value.trim();
+    const resultDiv = document.getElementById("result");
+    resultDiv.textContent = "";
+
+    if (!/^\d+$/.test(userId) || !/^\d+$/.test(zoneId)) {
+        resultDiv.innerHTML = `<span class="error">Invalid ID or Zone</span>`;
+        return;
+    }
+
+    try {
+        const ts = Math.floor(Date.now() / 1000).toString();
+        const nonce = crypto.getRandomValues(new Uint8Array(8))
+            .reduce((s, b) => s + b.toString(16).padStart(2, "0"), "");
+
+        const secretKey = getSecretKey();
+        const message = `${userId}:${zoneId}:${ts}:${nonce}`;
+        const sig = await hmacSHA256(secretKey, message);
+
+        const raw = new Uint8Array([
+            ...new TextEncoder().encode(userId), 124,
+            ...new TextEncoder().encode(zoneId), 124,
+            ...new TextEncoder().encode(ts), 124,
+            ...new TextEncoder().encode(nonce), 124,
+            ...sig
+        ]);
+
+        const payload = toHex(raw);
+
+        const res = await fetch(API_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: new URLSearchParams({ data: payload })
+        });
+
+        const data = await res.json();
+
+        if (data.success && (data.nickname === "Unknown" || data.country?.toUpperCase() === "UNKNOWN")) {
+            throw new Error("Invalid ID or Zone (no player found)");
+        }
+
+        if (!data.success) {
+            throw new Error(data.error || "Unknown error");
+        }
+
+        resultDiv.textContent =
+            `User ID       : ${data.user_id}\n` +
+            `Nickname      : ${data.nickname}\n` +
+            `Country       : ${data.country}\n` +
+            `Creation Date : ${data.estimated_creation_date}`;
+
+    } catch (err) {
+        resultDiv.innerHTML = `<span class="error">Error: ${err.message}</span>`;
+    }
+}
+</script>
+
+
+</body>
+</html>
